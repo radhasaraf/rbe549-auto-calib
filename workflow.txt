@@ -1,0 +1,8 @@
+# Section 4.1
+
+# Get world coordinates of checkerboard corners # These will remain fixed throughtout all the images
+# Get image coordinates of corner for all images. # Use cv2.findChessboardCorners
+# Get Homography between world and image coordinates
+# Define Vij and b to setup the system of homogenous linear equations: Vb=0
+# Use eigenvector of V_t*V corresponding to smallest eigenvalue as b
+# Get A matrix from b vector # Use Appendix
