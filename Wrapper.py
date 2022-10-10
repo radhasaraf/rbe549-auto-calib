@@ -10,6 +10,7 @@ def get_v_ij(h: List[List[float]], i: int, j: int) -> List:
     Returns the v_ij vector required for setting up the system of homogenous
     linear equations.
     """
+    h = np.transpose(h)
     i -= 1
     j -= 1
     return [
@@ -53,7 +54,8 @@ def main():
     # termination criteria for sub pixel accuracy
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
-    # prepare world points, like (0,0,0), (1,0,0), (2,0,0) ....,(8,5,0)
+    # prepare world points: (0,0,0), (1,0,0), ....,(8,5,0)
+    # unit coz actual length doesn't make a diff since homography is to scale
     world_pts = np.zeros((9 * 6, 3), np.float32)
     world_pts[:, :2] = np.mgrid[0:9, 0:6].T.reshape(-1, 2)
 
@@ -80,17 +82,21 @@ def main():
     # Form homogenous system of linear equations:
     V = []
     for i in range(len(all_world_points)):
-        h, _ = cv2.findHomography(all_img_points[i], all_world_points[i], cv2.RANSAC)
+        h, _ = cv2.findHomography(all_world_points[i], all_img_points[i], cv2.RANSAC)
+
         equ1 = get_v_ij(h, 1, 2)
         equ2 = np.subtract(get_v_ij(h, 1, 1), get_v_ij(h, 2, 2))
         V.extend([equ1, equ2])
 
-    # Find solution to homogenous system of linear equations
-    e_vals, e_rows = np.linalg.eig(np.dot(np.transpose(V), V))
+    # Find solution to homogenous system
+    V = np.array(V)
+    e_vals, e_rows = np.linalg.eig(V.T @ V)
     e_vecs = e_rows.T  # Take transpose because vectors are columns, not rows
     b = e_vecs[np.argmin(e_vals)]
 
+    # Get camera matrix
     mat = get_intrinsic_mat(b)
+    print("mat", mat)
 
 
 if __name__ == '__main__':
