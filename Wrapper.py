@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 
-def get_v_ij(h: List[List[float]], i: int, j: int) -> List:
+def get_v_ij(h: np.array(List[List[float]]), i: int, j: int) -> np.array(List[float]):
     """
     Returns the v_ij vector required for setting up the system of homogenous
     linear equations.
@@ -13,17 +13,26 @@ def get_v_ij(h: List[List[float]], i: int, j: int) -> List:
     h = np.transpose(h)
     i -= 1
     j -= 1
-    return [
+    return np.array([
         h[i][0] * h[j][0],
         h[i][0] * h[j][1] + h[i][1] * h[j][0],
         h[i][1] * h[j][1],
         h[i][2] * h[j][0] + h[i][0] * h[j][2],
         h[i][2] * h[j][1] + h[i][1] * h[j][2],
         h[i][2] * h[j][2],
-    ]
+    ])
 
 
-def get_intrinsic_mat(b_vec: List) -> List[List[float]]:
+def solve_homogenous_sys(parameter_mat: np.array(List[List[float]])) -> np.array(List[float]):
+    """
+
+    """
+    e_vals, e_rows = np.linalg.eig(parameter_mat.T @ parameter_mat)
+    e_vecs = e_rows.T  # Take transpose because vectors are columns, not rows
+    return e_vecs[np.argmin(e_vals)]
+
+
+def get_intrinsic_mat(b_vec: np.array(List[float])) -> np.array(List[List[float]]):
     """
     Calculates the intrinsic matrix from the b vector according to Appendix A
     in the reference paper.
@@ -36,17 +45,48 @@ def get_intrinsic_mat(b_vec: List) -> List[List[float]]:
     b33 = b_vec[5]
 
     v = (b12 * b13 - b11 * b23) / (b11 * b22 - b12 ** 2)
-    lmda = b33 - [(b13 ** 2) + (v * (b12 * b13 - b11 * b23))] / b11
+    lmda = b33 - ((b13 ** 2) + (v * (b12 * b13 - b11 * b23))) / b11
     alpha = np.sqrt(lmda / b11)
     beta = np.sqrt(lmda * b11 / ((b11 * b22) - (b12 ** 2)))
     gamma = -b12 * (alpha ** 2) * beta / lmda
     u = gamma * v / beta - b13 * (alpha ** 2) / lmda
 
-    return [
+    return np.array([
         [alpha, gamma, u],
         [0,     beta,  v],
         [0,     0,     1]
-    ]
+    ])
+
+
+def get_extrinsics(camera_matrix: np.array(List[List[float]]), homographies: List[List[List[float]]]):
+    """
+
+    """
+    A_inv = np.linalg.inv(camera_matrix)
+
+    all_extrinsics = []
+    for h in homographies:
+
+        # Get column vectors of H
+        h_T = h.T
+        h1 = h_T[0].T
+        h2 = h_T[1].T
+        h3 = h_T[2].T
+
+        r1 = A_inv @ h1
+        r2 = A_inv @ h2
+
+        lmda1 = 1 / np.linalg.norm(r1)
+        lmda2 = 1 / np.linalg.norm(r2)
+
+        r1 *= lmda1
+        r2 *= lmda2
+
+        r3 = np.cross(r1, r2)
+        t = lmda1 * (A_inv @ h3)  # Any lmda is fine since both are close
+
+        all_extrinsics.append([r1, r2, r3, t])
+    return all_extrinsics
 
 
 def main():
@@ -81,8 +121,12 @@ def main():
 
     # Form homogenous system of linear equations:
     V = []
+    homographies = []
     for i in range(len(all_world_points)):
         h, _ = cv2.findHomography(all_world_points[i], all_img_points[i], cv2.RANSAC)
+
+        # Save homographies for optimization
+        homographies.append(h)
 
         equ1 = get_v_ij(h, 1, 2)
         equ2 = np.subtract(get_v_ij(h, 1, 1), get_v_ij(h, 2, 2))
@@ -90,13 +134,14 @@ def main():
 
     # Find solution to homogenous system
     V = np.array(V)
-    e_vals, e_rows = np.linalg.eig(V.T @ V)
-    e_vecs = e_rows.T  # Take transpose because vectors are columns, not rows
-    b = e_vecs[np.argmin(e_vals)]
+    b = solve_homogenous_sys(V)
 
     # Get camera matrix
     mat = get_intrinsic_mat(b)
-    print("mat", mat)
+    print("Camera matrix: ", mat)
+
+    extrs = get_extrinsics(mat, homographies)
+    print("Extrinsics(r1, r2, r3, t): ", extrs[0])
 
 
 if __name__ == '__main__':

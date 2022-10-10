@@ -1,4 +1,4 @@
-# Section 4.1
+## Section 4.1: Solve for camera intrinsic matrix
 
 # Get world coordinates of checkerboard corners # These will remain fixed throughtout all the images
 # Get image coordinates of corner for all images. # Use cv2.findChessboardCorners
@@ -6,3 +6,8 @@
 # Define Vij and b to setup the system of homogenous linear equations: Vb=0
 # Use eigenvector of V_t*V corresponding to smallest eigenvalue as b
 # Get A matrix from b vector # Use Appendix
+
+
+## Section 4.2: Estimate approximate camera extrinsics
+
+# Get R, t from camera intrinsics and homographies # Use section 3.1
