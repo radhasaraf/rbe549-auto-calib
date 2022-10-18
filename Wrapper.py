@@ -92,8 +92,10 @@ def get_extrinsics(camera_matrix: np.array(List[List[float]]), homographies: Lis
     return np.array(R_mats), np.array(t_vecs)
 
 
-def get_projected_corners(camera_matrix, r_mats, t_vecs, world_points):
+def get_projected_corners(camera_matrix, r_mats, t_vecs, dist_coeffs, world_points):
     """
+    Returns the image coordinates for corners projected using the world points
+    & all the calibration parameters- intrinsics, extrinsics & distortion coeffs.
     :param camera_matrix:(3x3)
     :param r_mats: numpy array of all rotation matrices (mx3x3)
     :param t_vecs: numpy array of all translational vectors (mx3x1)
@@ -109,44 +111,60 @@ def get_projected_corners(camera_matrix, r_mats, t_vecs, world_points):
     # Get extrinsic matrix from r_mat and t_vec
     extrinsic_matrices = np.append(r_mats, t_vecs, axis=2)
 
+    # Get radius of distortion for world points
+    distorted_coords = np.matmul(extrinsic_matrices, world_points)
+    dist_coords_homo = np.zeros((13, 2, 54))
+    dist_coords_homo[:, 0, :] = distorted_coords[:, 0, :] / distorted_coords[:, 2, :]
+    dist_coords_homo[:, 1, :] = distorted_coords[:, 1, :] / distorted_coords[:, 2, :]
+    r = np.sqrt(dist_coords_homo[:, 0, :]**2 + dist_coords_homo[:, 1, :]**2)
+
     # Get projected coords
     img_coords = np.matmul(
         camera_matrix,
         np.matmul(extrinsic_matrices, world_points)
     )
-
     # homogenize
-    img_coords[:, 0, :] = img_coords[:, 0, :] / img_coords[:, 2, :]
-    img_coords[:, 1, :] = img_coords[:, 1, :] / img_coords[:, 2, :]
-    img_coords[:, 2, :] = img_coords[:, 2, :] / img_coords[:, 2, :]
+    u = img_coords[:, 0, :] / img_coords[:, 2, :]
+    v = img_coords[:, 1, :] / img_coords[:, 2, :]
+
+    # projected coords considering distortion
+    k1, k2 = dist_coeffs[0], dist_coeffs[1]
+    u0 = camera_matrix[0, 2]
+    v0 = camera_matrix[1, 2]
+
+    u_ = u + (u - u0) * (k1 * r ** 2 + k2 * r ** 4)
+    v_ = v + (v - v0) * (k1 * r ** 2 + k2 * r ** 4)
+
+    img_coords = np.zeros((13, 3, 54))
+    img_coords[:, 0, :] = u_
+    img_coords[:, 1, :] = v_
+    img_coords[:, 2, :] = ones
 
     return img_coords
 
 
-def objective_function(x, detected_corners, world_points):
+def objective_function(x, detected_corners, world_points) -> float:
     """
-    :param x: param vector encoding camera matrix, rotation & translation vec.
+    Defines the objective residual(error) function whose value the optimizer
+    would try to minimize.
+    :param x: param vector encoding camera matrix, rotn & trans vec and dist.
     :param detected_corners: 13
     :param world_points:
-    :return:
+    :return: float
     """
     # TODO: Make types of img and world points the same
 
-    # print("det_cor", detected_corners.shape)
-    # print("wor_pts", world_points.shape)
-
+    # Required pre-processing
     detected_corners = np.array(detected_corners)
     detected_corners = detected_corners.reshape((13, 54, -1))
     detected_corners = detected_corners.swapaxes(1, 2)
-
     ones = np.ones((13, 1, 54))
     detected_corners = np.concatenate((detected_corners, ones), axis=1)
 
-    camera_matrix, Rs, ts = from_parameter_vector(x)
-    projected_corners = get_projected_corners(camera_matrix, Rs, ts, world_points)
+    camera_matrix, Rs, ts, dist_coeffs = from_parameter_vector(x)
+    projected_corners = get_projected_corners(camera_matrix, Rs, ts, dist_coeffs, world_points)
 
     residual = detected_corners - projected_corners
-
     residual = residual.swapaxes(1, 2)
 
     sum = 0
@@ -156,28 +174,21 @@ def objective_function(x, detected_corners, world_points):
     return sum
 
 
-def to_parameter_vector(
-        camera_matrix: np.array(List[List[float]]),
-        r_mats: np.array(List[List[float]]),
-        t_vecs: np.array(List[List[float]])
-    ) -> np.array:
+def to_parameter_vector(camera_matrix, r_mats, t_vecs, dist_coeffs: bool = True) -> np.array:
     """
     Appends all the parameters to be optimized into a vector to be passed to the
     optimization function.
     :return: 5 + 13*6: 83 (dim: 1x83)
     """
-    parameter_vector = []
 
     # Append intrinsics
-    parameter_vector.extend(
-        [
-            camera_matrix[0, 0],
-            camera_matrix[0, 1],
-            camera_matrix[0, 2],
-            camera_matrix[1, 1],
-            camera_matrix[1, 2],
-        ]
-    )
+    parameter_vector = [
+        camera_matrix[0, 0],
+        camera_matrix[0, 1],
+        camera_matrix[0, 2],
+        camera_matrix[1, 1],
+        camera_matrix[1, 2],
+    ]
 
     # Append parametrized R
     r_params = []
@@ -194,13 +205,16 @@ def to_parameter_vector(
         t_params = np.append(t_params, t_vec, axis=0)
     parameter_vector.extend(list(t_params))
 
+    if dist_coeffs:
+        parameter_vector.extend([0, 0])
+
     return np.array(parameter_vector)
 
 
-def from_parameter_vector(vec: np.array):
+def from_parameter_vector(vec: np.array, dist_coeffs: bool = True):
     """
     Breaks down the parameter vector into its foundational elements and returns
-    the camera matrix, rotation matrix and the translation vector
+    the camera matrix, rotation matrix and the translation vector.
     """
     camera_matrix = np.array(
         [
@@ -220,6 +234,9 @@ def from_parameter_vector(vec: np.array):
     t_params = np.array(vec[44:83]).reshape((-1, 3))
     for t_param in t_params:
         ts.append(np.array([t_param]).T)
+
+    if dist_coeffs:
+        return camera_matrix, Rs, ts, vec[-2:]
 
     return camera_matrix, Rs, ts
 
@@ -270,15 +287,14 @@ def main():
     r_mats, t_vecs = get_extrinsics(mat, homographies)
 
     param_vector = to_parameter_vector(mat, r_mats, t_vecs)
-
     res = minimize(
         objective_function,
         param_vector,
         args=(all_img_points, world_pts),
     )
 
-    optimized_param_vec = res.x
-    opt_cam_mat, opt_Rs, opt_ts = from_parameter_vector(optimized_param_vec)
+    opt_param_vec = res.x
+    opt_cam_mat, opt_Rs, opt_ts, dst_coef = from_parameter_vector(opt_param_vec)
 
 
 if __name__ == '__main__':
