@@ -11,3 +11,10 @@
 ## Section 4.2: Estimate approximate camera extrinsics
 
 # Get R, t from camera intrinsics and homographies # Use section 3.1
+
+
+## Section 5: Non-linear Geometric Error Minimization
+
+# Use minimize function from the scipy.optimize module
+# Define objective function as the product of cam intrisincs, extrinsics, world coords
+# Use objective function in the scipy.optimize module to reduce the reprojection error
