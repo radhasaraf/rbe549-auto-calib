@@ -169,8 +169,12 @@ def objective_function(x, detected_corners, world_points) -> float:
 
     sum = 0
     for i in range(13):
+        # sum_for_each_image = 0
         for j in range(54):
-            sum += residual[i, j, 0]**2 + residual[i, j, 1]**2 + residual[i, j, 2]**2
+            res = residual[i, j, 0]**2 + residual[i, j, 1]**2 + residual[i, j, 2]**2
+            sum += res
+            # sum_for_each_image += res
+        # print(f"Sum for image{i}: {sum_for_each_image/54}")
     return sum
 
 
@@ -311,6 +315,10 @@ def main():
     r_mats, t_vecs = get_extrinsics(mat, homographies)
 
     param_vector = to_parameter_vector(mat, r_mats, t_vecs)
+
+    # Get mean re-projection errors prior to optimization
+    # objective_function1(param_vector, all_img_points, world_pts)
+
     res = minimize(
         objective_function,
         param_vector,
@@ -321,6 +329,9 @@ def main():
     opt_cam_mat, opt_Rs, opt_ts, dst_coef = from_parameter_vector(opt_param_vec)
 
     undistort_images(calib_image_files, opt_cam_mat)
+
+    # Get mean re-projection errors post optimization
+    # objective_function1(opt_param_vec, all_img_points, world_pts)
 
 
 if __name__ == '__main__':
