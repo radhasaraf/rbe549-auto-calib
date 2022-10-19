@@ -241,6 +241,30 @@ def from_parameter_vector(vec: np.array, dist_coeffs: bool = True):
     return camera_matrix, Rs, ts
 
 
+def undistort_images(calib_image_files, opt_cam_mat) -> None:
+    """
+    Undistorts original calibration images using undistort function from OpenCV
+    """
+    # TODO: Define your own function for inverse warping
+
+    # Adding additional coefficients obtained from opencv calibration since
+    # undistort expects these parameters
+    dist = np.array(
+        [0.17310107, -0.75331797, 0.00270529992, 0.000961801220, 6.52472281]
+    )
+
+    for idx, file in enumerate(calib_image_files):
+        img = cv2.imread(file)
+        h, w = img.shape[:2]
+        newcameramtx, roi = cv2.getOptimalNewCameraMatrix(opt_cam_mat, dist,
+                                                          (w, h), 1,
+                                                          (w, h))
+        dst = cv2.undistort(img, opt_cam_mat, dist, None, newcameramtx)
+        x, y, w, h = roi
+        dst = dst[y:y + h, x:x + w]
+        cv2.imwrite(f'undistorted_{idx}.png', dst)
+
+
 def main():
 
     # termination criteria for sub pixel accuracy
@@ -295,6 +319,8 @@ def main():
 
     opt_param_vec = res.x
     opt_cam_mat, opt_Rs, opt_ts, dst_coef = from_parameter_vector(opt_param_vec)
+
+    undistort_images(calib_image_files, opt_cam_mat)
 
 
 if __name__ == '__main__':
